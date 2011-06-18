@@ -12,5 +12,12 @@ setup(name='aribackup',
     packages=['aribackup',],
     maintainer='Michael Hrivnak',
     maintainer_email='mhrivnak@tireswingsoftware.com',
-    license='BSD'
+    license='BSD',
+    classifiers = ['Development Status :: 5 - Production/Stable',
+        'Intended Audience :: System Administrators',
+        'License :: OSI Approved :: BSD License',
+        'Operating System :: OS Independent',
+        'Programming Language :: Python',
+        'Topic :: System :: Archiving :: Backup'
+    ],
 )
