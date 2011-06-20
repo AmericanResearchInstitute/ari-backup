@@ -1,4 +1,5 @@
 import logging
+import sys
 from logging.handlers import SysLogHandler
 
 class Logger(logging.Logger):
