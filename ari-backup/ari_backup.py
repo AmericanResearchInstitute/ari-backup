@@ -1,4 +1,5 @@
 import os
+import rdiff_backup.Main
 import sys
 import subprocess
 import shlex
@@ -6,13 +7,14 @@ import shlex
 from logger import Logger
 
 def exit(logger, message, error=True):
-    '''
-    Wrapper around sys.exit to faciliate good logging
+    '''Wrapper around sys.exit to faciliate good logging
+
     This just functionalizes some code that gets used a lot in here,
     logging a message and appropriately exiting.
 
     It default to an error on exit, but can be used to exit nicely.
     Usually (always?) an errorless exit means "keep going", though.
+
     '''
     # Make sure to stringify the message, sometimes we just get ints back :(
     message = str(message)
@@ -24,22 +26,23 @@ def exit(logger, message, error=True):
         sys.exit(0)
 
 class AriBackup:
-    '''
-    This class is a wrapper around rdiff-backup.  It provides facilities to run
+    '''Wrapper around rdiff-backup
+
+    It provides facilities to run
     remote backups with additional custom features to help manage LVM snapshots
     for backup purposes.  It was written with a Xen/LVM type environment in mind.
     Arbitrary remote job execution is also provided.
+
     '''
     def __init__(self, hostname):
         # Gotta have a hostname...
         self.hostName = hostname
 
         # setup logging
-        self.logger = Logger('ariBackup (%s)' % hostname)
+        self.logger = Logger('AriBackup (%s)' % hostname)
 
         # TODO: Add validation on these paths
         self.sshExec = '/usr/bin/ssh'
-        self.backupExec = '/usr/bin/rdiff-backup'
         self.backupStore = '/srv/backup-store'
         self.backupTmp = '%s/tmp' % ( self.backupStore )
 
@@ -81,17 +84,20 @@ class AriBackup:
         self.logger.info('initialized')
 
     def __del__(self):
-        '''
-        This deconstructor is mostly for logging that things have stopped. This
-        especially useful to know that the script has abruptly stopped due to a
-        syntax error or something similar.
+        '''Our deconstructor, mostly for logging that things have stopped.
+
+        This is especially useful for knowing that the script has
+        abruptly stopped due to a syntax error or something similar.
+
         '''
         self.logger.info('stopped')
 
     def runJob(self, command):
-        '''
-        This takes a given input string and attempts to execute
-        it on the remote host via SSH
+        '''Runs an arbitrary job on the remote host.
+
+        Given an input string, we attempt to execute it on the remote
+        host via SSH.
+
         '''
         # Spawn off an SSH child process to do the given command
         # Wait for ssh to end before processing
@@ -118,10 +124,7 @@ class AriBackup:
         return exitcode
 
     def runLocalJob(self, command):
-        '''
-        This takes a given input string and attempts to execute
-        it on the local host
-        '''
+        '''Runs an arbitrary job on the local host.'''
         try:
             args = shlex.split(command)
             self.logger.info('runLocalJob %r' % args)
@@ -180,11 +183,12 @@ class AriBackup:
         return exitcode
 
     def runBackup(self):
-        '''
+        '''Run typical rdiff-backup backup job.
+
         This generates an argument list as expected by rdiff_backup,
         and then passes it directly to the rdiff_backup module
-        '''
 
+        '''
         self.logger.info('runBackup started')
 
         if not self.sshCompression:
@@ -223,21 +227,20 @@ class AriBackup:
         # Call rdiff-backup, spawning a new thread and waiting for it
         # to execute before finishing
         try:
-            import rdiff_backup.Main
             rdiff_backup.Main.error_check_Main(self.argList)
-        except IOError:
-            exit(self.logger, 'Unable to execute %s. Exiting...' % self.backupExec)
         except:
             exit(self.logger, 'An unforseen excpetion has arisen. Exiting.')
 
         self.logger.info('runBackup completed')
 
     def doMysqlDump(self, gzip=False, routines=True):
-        '''
-        Constructs a suitable mysqldump command-line and pass to runJob
-        gzip is a bool, and will pipe through gzip to all.sql.gz
-        '''
+        '''Performs MySQL script dump using mysqldump.
 
+        Constructs a suitable mysqldump command-line and passes it to runJob
+
+        gzip is a bool, and will pipe through gzip to all.sql.gz
+
+        '''
         dumpExec = "mysqldump -u backup --all-databases --force"
 
         if routines:
@@ -255,11 +258,7 @@ class AriBackup:
         self.runJob(command)
 
     def _createSnapShots(self):
-        '''
-        Creates snapshot logical volumes of all the volumns listed in
-        self.lvList
-        '''
-
+        '''Creates snapshots of all the volumns listed in self.lvList.'''
         for v in self.lvList:
             vgName, lvName = v[0].split('/')
             newLVName = lvName + '-rdiff'
@@ -306,11 +305,12 @@ class AriBackup:
             self.runJobOnVMHost('rmdir %s' % v[1])
 
     def runSnapShotBackup(self):
-        '''
+        '''Run backup of LVM snapshots
+
         This generates an argument list as expected by rdiff_backup,
         and then passes it directly to the rdiff_backup module
-        '''
 
+        '''
         self.logger.info('runSnapShotBackup started')
 
         if not self.sshCompression:
@@ -349,10 +349,7 @@ class AriBackup:
         # Call rdiff-backup, spawning a new thread and waiting for it
         # to execute before finishing
         try:
-            import rdiff_backup.Main
             rdiff_backup.Main.error_check_Main(self.argList)
-        except IOError:
-            exit(self.logger, 'Unable to execute %s. Exiting' % self.backupExec)
         except:
             exit(self.logger, 'An unforseen excpetion has arisen. Exiting.')
 
@@ -362,11 +359,12 @@ class AriBackup:
         self.logger.info('runSnapShotBackup completed')
 
     def removeOlderThan(self, timespec):
-        '''
-        uses rdiff-backup's --remove-old-than feature to trim old
-        increments from the backup history
-        '''
+        '''Trims old backups older than timestamp
 
+        Uses rdiff-backup's --remove-old-than feature to trim old
+        increments from the backup history
+
+        '''
         self.logger.info('removeOlderThan %s started' % timespec)
         # use a local argList since we're doing something entirely different
         # than a backup
