@@ -1,8 +1,9 @@
 import os
 import rdiff_backup.Main
-import sys
+import settings
 import subprocess
 import shlex
+import sys
 
 from logger import Logger
 
@@ -34,7 +35,7 @@ class AriBackup:
     Arbitrary remote job execution is also provided.
 
     '''
-    def __init__(self, source_hostname, label, **kwargs):
+    def __init__(self, source_hostname, label, remove_older_than_timespec=None):
         # This is the host that has the source data.
         self.source_hostname = source_hostname
 
@@ -49,26 +50,38 @@ class AriBackup:
         self.include_dir_list = []
         self.include_file_list = []
         # Exclude nothing by default
-        # Add the '**' exclude to the end of the list later
+        # We'll put the '**' exclude on the end of the arg_list later
         self.exclude_dir_list = []
         self.exclude_file_list = []
 
-        # Read the settings from YAML, and mash them with stuff from kwargs
-        self._process_settings(**kwargs)
+        # initialize hook lists
+        self.pre_job_hook_list = []
+        self.post_job_hook_list = []
+
+        if remove_older_than_timespec != None:
+            self.post_job_hook_list.append((
+                self._remove_older_than, {'timespec': remove_older_than_timespec}))
 
         self.logger.info('initialized')
 
-    def run_job(self, command, host='localhost'):
-        try:
-            return self._run_job(command, host)
-        except Exception, e:
-            exit(str(e))
 
-    def _run_job(self, command, host='localhost'):
-        '''Runs an arbitrary job on the remote host.
+    def _process_pre_job_hooks(self):
+        self.logger.info('processing pre-job hooks...')
+        for hook in self.pre_job_hook_list:
+            hook[0](self, **hook[1])
 
-        Given an input string, we attempt to execute it on the remote
-        host via SSH.
+
+    def _process_post_job_hooks(self, error_case=False):
+        self.logger.info('processing post-job hooks...')
+        for hook in self.post_job_hook_list:
+            hook[0](self, error_case, **hook[1])
+
+
+    def _run_command(self, command, host='localhost'):
+        '''Runs an arbitrary command on host.
+
+        Given an input string, we attempt to execute it on the host via SSH
+        unless host is "localhost".
 
         '''
         # Spawn off an SSH child process to do the given command
@@ -79,7 +92,7 @@ class AriBackup:
             else:
                 args = shlex.split('%s %s@%s %s' % (self.sshExec,
                     self.userName, self.hostName, command.strip('"')))
-            self.logger.info('runJob %r' % args)
+            self.logger.info('run_command %r' % args)
             p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = p.communicate()
 
@@ -100,9 +113,13 @@ class AriBackup:
 
     def run_backup(self):
         try:
+            self._process_pre_job_hooks()
             self._run_backup()
+            self._process_post_job_hooks()
         except Exception, e:
-            exit(str(e))
+            self.logger.error((str(e)))
+            self.logger.error('performing clean up...')
+            self._process_post_job_hooks(error_case=True)
 
 
     def _run_backup(self):
@@ -112,8 +129,6 @@ class AriBackup:
         and then passes it directly to the rdiff_backup module
 
         '''
-        self._run_pre_backup_hooks()
-
         self.logger.info('run_backup started')
 
         # Define argument list to be passed to the rdiff_backup module
@@ -129,7 +144,10 @@ class AriBackup:
         # Bring the terminal verbosity down so that we only see errors
         arg_list += ['--terminal-verbosity', '1']
 
-        if not self.ssh_compression:
+        # This conditional reads strangely, but that's because rdiff-backup
+        # not only defaults to have SSH compression enabled, it also doesn't
+        # have an option to explicitly enable it -- only one to disable it.
+        if not settings.ssh_compression:
             arg_list.append('--ssh-no-compression')
 
         # Populate self.argument list
@@ -154,67 +172,39 @@ class AriBackup:
         arg_list.append('--exclude')
         arg_list.append('**')
 
-        # Let rdiff know where it's aimed
+        # Add a source argument
         if self.source_hostname == 'localhost':
             arg_list.append('/')
         else:
             arg_list.append('%s@%s::/' % (self.username, self.source_hostname) )
+
+        # Add a destination argument
         arg_list.append('%s/%s' % ( self.backup_store, self.label) )
 
+        # Rdiff-backup GO!
         rdiff_backup.Main.error_check_Main(arg_list)
-
         self.logger.info('run_backup completed')
 
-        self._run_post_backup_hooks()
 
+    def _remove_older_than(self, error_case, timespec):
+        '''Trims increments older than self.remove_older_than_timespec
 
-    def remove_older_than(self, timespec):
-        '''Trims old backups older than timestamp
-
-        Uses rdiff-backup's --remove-old-than feature to trim old
-        increments from the backup history
+        Post-job hook that uses rdiff-backup's --remove-old-than feature to
+        trim old increments from the backup history
 
         '''
-        self.logger.info('remove_older_than %s started' % timespec)
+        if not error_case: 
+            self.logger.info('remove_older_than %s started' % timespec)
 
-        arg_list = []
-        arg_list.append('--force')
-        arg_list.append('--remove-older-than')
-        arg_list.append(timespec)
-        arg_list.append('%s/%s' % (self.backup_store, self.label))
+            arg_list = []
+            arg_list.append('--force')
+            arg_list.append('--remove-older-than')
+            arg_list.append(timespec)
+            arg_list.append('%s/%s' % (settings.backup_store_path, self.label))
 
-        rdiff_backup.Main.error_check_Main(arg_list)
+            rdiff_backup.Main.error_check_Main(arg_list)
 
-        self.logger.info('remove_older_than %s completed' % timespec)
-
-
-    def _rdiff_backup(self, arg_list):
-        # TODO: Does this *really* start a new thread? Does that even matter for our code?
-        # Call rdiff-backup, spawning a new thread and waiting for it
-        # to execute before finishing
-        try:
-        except:
-            exit(self.logger, 'An unforseen excpetion has arisen. Exiting.')
-
-
-    def _process_settings(self, **kwargs):
-        ###################
-        # These are in YAML
-        ###################
-        # TODO: Add validation on these paths
-        self.ssh_exec = '/usr/bin/ssh'
-        self.backup_store = '/srv/backup-store'
-        # These will be set by the backup script
-        self.remote_username = ''
-        # Default to no SSH compression
-        self.ssh_compression = False
-        ##################
-
-        settings = yaml
-        for key, value in enumerate(kwargs):
-            settings[key] = value
-        for key, value in enumerate(settings):
-            setattr(self, key, value)
+            self.logger.info('remove_older_than %s completed' % timespec)
 
 
     def __del__(self):
@@ -228,29 +218,29 @@ class AriBackup:
 
 
 class LVMBackup(AriBackup):
-    def __init__(self, source_hostname, label, *args, **kwargs):
-        super(self.__class__, self).__init__(source_hostname, label, *args, **kwargs)
+    def __init__(self, source_hostname, label):
+        super(self.__class__, self).__init__(source_hostname, label)
         # This is a list of 2-tuples, where each inner 2-tuple expresses the lv to back up, and
         # the mount point for that LV. For example, (('hostname/root, '/'),)
         self.lv_list = []
         # a list of tuples with the snapshot paths and where they should be
         # mounted
         self.lv_snap_shots = []
-        self.snap_shot_mount_point_base_path = os.path.join('/tmp', self.label)
+        self.snap_shot_mount_point_base_path = os.path.join(settings.remote_snapshot_mount_root, self.label)
 
-    def _createSnapShots(self):
+    def _create_snap_shots(self):
         '''Creates snapshots of all the volumns listed in self.lvList.'''
-        for v in self.lvList:
-            vgName, lvName = v[0].split('/')
-            newLVName = lvName + '-rdiff'
-            mountPath = '%s%s' % (self.snapShotMountPointBasePath, v[1])
+        for v in self.lv_list:
+            vg_name, lv_name = v[0].split('/')
+            new_lv_name = lv_name + '-rdiff'
+            mount_path = '%s%s' % (self.snap_shot_mount_point_base_path, v[1])
 
             # v[2] might be mount options for this LV. We'd like to pass that info along if available
             # to lvSnapShots.
             try:
-                self.lvSnapShots.append((vgName + '/' + newLVName, mountPath, v[2]))
+                self.lv_snap_shots.append((vg_name + '/' + new_lv_name, mount_path, v[2]))
             except IndexError:
-                self.lvSnapShots.append((vgName + '/' + newLVName, mountPath))
+                self.lv_snap_shots.append((vg_name + '/' + new_lv_name, mount_path))
 
             self.runJobOnVMHost('lvcreate -s -L 1G %s -n %s' % (v[0], newLVName))
 
