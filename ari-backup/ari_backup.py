@@ -1,5 +1,4 @@
 import os
-import rdiff_backup.Main
 import settings
 import subprocess
 import shlex
@@ -26,7 +25,7 @@ def exit(logger, message, error=True):
         logger.info(message)
         sys.exit(0)
 
-class AriBackup:
+class ARIBackup(object):
     '''Wrapper around rdiff-backup
 
     It provides facilities to run
@@ -35,7 +34,7 @@ class AriBackup:
     Arbitrary remote job execution is also provided.
 
     '''
-    def __init__(self, source_hostname, label, remove_older_than_timespec=None):
+    def __init__(self, label, source_hostname, remove_older_than_timespec=None):
         # This is the host that has the source data.
         self.source_hostname = source_hostname
 
@@ -43,8 +42,12 @@ class AriBackup:
         # that has the data).
         self.label = label
 
+        # We'll bring in the remote_user from our settings, but it is a var
+        # that the end-user is welcome to override.
+        self.remote_user = settings.remote_user
+
         # setup logging
-        self.logger = Logger('AriBackup ({label})'.format(label=label))
+        self.logger = Logger('ARIBackup ({label})'.format(label=label))
 
         # Include nothing by default
         self.include_dir_list = []
@@ -60,39 +63,57 @@ class AriBackup:
 
         if remove_older_than_timespec != None:
             self.post_job_hook_list.append((
-                self._remove_older_than, {'timespec': remove_older_than_timespec}))
+                self._remove_older_than,
+                {'timespec': remove_older_than_timespec}))
 
         self.logger.info('initialized')
 
 
     def _process_pre_job_hooks(self):
         self.logger.info('processing pre-job hooks...')
-        for hook in self.pre_job_hook_list:
-            hook[0](self, **hook[1])
+        for task in self.pre_job_hook_list:
+            # Let's do some assignments for readability
+            hook = task[0]
+            kwargs = task[1]
+            hook(**kwargs)
 
 
     def _process_post_job_hooks(self, error_case=False):
-        self.logger.info('processing post-job hooks...')
-        for hook in self.post_job_hook_list:
-            hook[0](self, error_case, **hook[1])
+        if error_case:
+            self.logger.info('processing post-job hooks for error case...')
+        else:
+            self.logger.info('processing post-job hooks...')
+
+        for task in self.post_job_hook_list:
+            # Let's do some assignments for readability
+            hook = task[0]
+            kwargs = task[1]
+            kwargs.update({'error_case': error_case})
+            hook(**kwargs)
 
 
     def _run_command(self, command, host='localhost'):
         '''Runs an arbitrary command on host.
 
-        Given an input string, we attempt to execute it on the host via SSH
-        unless host is "localhost".
+        Given an input string or list, we attempt to execute it on the host via
+        SSH unless host is "localhost".
 
         '''
-        # Spawn off an SSH child process to do the given command
-        # Wait for ssh to end before processing
+        # make args a list if it's not already so
+        if type(command) == str:
+            args = shlex.split(command)
+        elif type(command) == list:
+            args = command
+        else:
+            raise Exception('_run_command: command arg must be str or list')
+
+        # add SSH arguments if this is a remote command
+        if host != 'localhost':
+            ssh_args = shlex.split('%s %s@%s' % (settings.ssh_path, self.remote_user, host))
+            args = ssh_args + args
+
         try:
-            if host == 'localhost':
-                args = shlex.split(command)
-            else:
-                args = shlex.split('%s %s@%s %s' % (self.sshExec,
-                    self.userName, self.hostName, command.strip('"')))
-            self.logger.info('run_command %r' % args)
+            self.logger.info('_run_command %r' % args)
             p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = p.communicate()
 
@@ -102,7 +123,7 @@ class AriBackup:
                 self.logger.error(stderr)
             exitcode = p.returncode
         except IOError:
-            exit(self.logger, 'Unable to execute %s. Exiting' % self.sshExec)
+            exit(self.logger, 'Unable to execute %s. Exiting' % args)
 
         if exitcode > 0:
             error_message = ('[{host}] A command terminated with errors and likely requires intervention. The '
@@ -131,10 +152,10 @@ class AriBackup:
         '''
         self.logger.info('_run_backup started')
 
-        # Define argument list to be passed to the rdiff_backup module
+        # Init our arguments list with the path to rdiff-backup.
         # This will be in the format we'd normally pass to the command-line
         # e.g. [ '--include', '/dir/to/include', '--exclude', '/dir/to/exclude']
-        arg_list = []
+        arg_list = [settings.rdiff_backup_path]
 
         # setup some default rdiff-backup options
         # TODO provide a way to override these
@@ -177,17 +198,17 @@ class AriBackup:
         if self.source_hostname == 'localhost':
             arg_list.append('/')
         else:
-            arg_list.append('%s@%s::/' % (self.username, self.source_hostname) )
+            arg_list.append('%s@%s::/' % (self.remote_user, self.source_hostname) )
 
         # Add a destination argument
-        arg_list.append('%s/%s' % ( self.backup_store, self.label) )
+        arg_list.append('%s/%s' % ( settings.backup_store_path, self.label) )
 
         # Rdiff-backup GO!
-        rdiff_backup.Main.error_check_Main(arg_list)
-        self.logger.info('run_backup completed')
+        self._run_command(arg_list)
+        self.logger.info('_run_backup completed')
 
 
-    def _remove_older_than(self, error_case, timespec):
+    def _remove_older_than(self, timespec, error_case=False):
         '''Trims increments older than timespec
 
         Post-job hook that uses rdiff-backup's --remove-old-than feature to
@@ -197,14 +218,13 @@ class AriBackup:
         if not error_case: 
             self.logger.info('remove_older_than %s started' % timespec)
 
-            arg_list = []
+            arg_list = [settings.rdiff_backup_path]
             arg_list.append('--force')
             arg_list.append('--remove-older-than')
             arg_list.append(timespec)
             arg_list.append('%s/%s' % (settings.backup_store_path, self.label))
 
-            rdiff_backup.Main.error_check_Main(arg_list)
-
+            self._run_command(arg_list)
             self.logger.info('remove_older_than %s completed' % timespec)
 
 
@@ -218,7 +238,7 @@ class AriBackup:
         self.logger.info('stopped')
 
 
-class LVMBackup(AriBackup):
+class LVMBackup(ARIBackup):
     def __init__(self, source_hostname, label):
         super(self.__class__, self).__init__(source_hostname, label)
         # This is a list of 2-tuples, where each inner 2-tuple expresses the lv to back up, and
