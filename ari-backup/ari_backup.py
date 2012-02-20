@@ -129,14 +129,15 @@ class AriBackup:
         and then passes it directly to the rdiff_backup module
 
         '''
-        self.logger.info('run_backup started')
+        self.logger.info('_run_backup started')
 
         # Define argument list to be passed to the rdiff_backup module
         # This will be in the format we'd normally pass to the command-line
-        # i.e. [ '--include', '/dir/to/include', '--exclude', '/dir/to/exclude']
+        # e.g. [ '--include', '/dir/to/include', '--exclude', '/dir/to/exclude']
         arg_list = []
 
         # setup some default rdiff-backup options
+        # TODO provide a way to override these
         arg_list.append('--exclude-device-files')
         arg_list.append('--exclude-fifos')
         arg_list.append('--exclude-sockets')
@@ -145,7 +146,7 @@ class AriBackup:
         arg_list += ['--terminal-verbosity', '1']
 
         # This conditional reads strangely, but that's because rdiff-backup
-        # not only defaults to have SSH compression enabled, it also doesn't
+        # not only defaults to having SSH compression enabled, it also doesn't
         # have an option to explicitly enable it -- only one to disable it.
         if not settings.ssh_compression:
             arg_list.append('--ssh-no-compression')
@@ -187,7 +188,7 @@ class AriBackup:
 
 
     def _remove_older_than(self, error_case, timespec):
-        '''Trims increments older than self.remove_older_than_timespec
+        '''Trims increments older than timespec
 
         Post-job hook that uses rdiff-backup's --remove-old-than feature to
         trim old increments from the backup history
