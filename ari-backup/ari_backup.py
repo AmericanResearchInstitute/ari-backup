@@ -239,8 +239,8 @@ class ARIBackup(object):
 
 
 class LVMBackup(ARIBackup):
-    def __init__(self, source_hostname, label):
-        super(self.__class__, self).__init__(source_hostname, label)
+    def __init__(self, source_hostname, label, remove_older_than_timespec=None):
+        super(self.__class__, self).__init__(source_hostname, label, remove_older_than_timespec)
 
         # This is a list of 2-tuples, where each inner 2-tuple expresses the LV
         # to back up, the mount point for that LV any mount options necessary.
@@ -251,8 +251,8 @@ class LVMBackup(ARIBackup):
 
         # a list of tuples with the snapshot paths and where they should be
         # mounted
-        self.lv_snap_shots = []
-        self.snapshot_mount_point_base_path = os.path.join(settings.remote_snapshot_mount_root, self.label)
+        self.lv_snapshots = []
+        self.snapshot_mount_point_base_path = os.path.join(settings.snapshot_mount_root, self.label)
         
         # setup pre and post job hooks to manage snapshot work flow
         self.pre_job_hook_list.append((self._create_snapshots, {}))
@@ -270,9 +270,9 @@ class LVMBackup(ARIBackup):
             mount_path = '%s%s' % (self.snapshot_mount_point_base_path, volume[1])
 
             # volume[2] might be mount options for this LV. We'd like to pass
-            # that info along, if available, to lv_snap_shots.
+            # that info along, if available, to lv_snapshots.
             try:
-                mount_options = v[2]
+                mount_options = volume[2]
                 self.lv_snapshots.append((vg_name + '/' + new_lv_name, mount_path, mount_options))
             except IndexError:
                 self.lv_snapshots.append((vg_name + '/' + new_lv_name, mount_path))
@@ -282,7 +282,7 @@ class LVMBackup(ARIBackup):
 
 
     def _delete_snapshots(self, error_case=None):
-    	'''Deletes snapshots in self.lv_snap_shots
+    	'''Deletes snapshots in self.lv_snapshots
     	
     	This method behaves the same in the normal and error cases.
     	
@@ -315,18 +315,18 @@ class LVMBackup(ARIBackup):
 
 
     def _umount_snapshots(self, error_case=None):
-    	'''Umounts mounted snapshots in self.lv_snap_shots
+    	'''Umounts mounted snapshots in self.lv_snapshots
     	
     	This method behaves the same in the normal and error cases.
     	
     	'''
-        # We need a local copy of the lv_snap_shots list to muck with in
+        # We need a local copy of the lv_snapshots list to muck with in
         # this method.
-        local_lv_snapshots = self.lv_snap_shots
+        local_lv_snapshots = self.lv_snapshots
         # We want to umount these LVs in reverse order as this should ensure
         # that we umount the deepest paths first.
         local_lv_snapshots.reverse()
-        for volume in local_lv_snap_shots:
+        for volume in local_lv_snapshots:
             mount_path = volume[1]
             
             self._run_command('umount %s' % mount_path, self.source_hostname)

@@ -19,7 +19,7 @@ for k, v in conf.iteritems():
     if k == 'backup_store_path': backup_store_path = v
     elif k == 'rdiff_backup_path': rdiff_backup_path = v
     elif k == 'remote_user': remote_user = v
-    elif k == 'remote_snapshot_mount_root': remote_snapshot_mount_root = v
+    elif k == 'snapshot_mount_root': snapshot_mount_root = v
     elif k == 'ssh_compression': ssh_compression = v
     elif k == 'ssh_path': ssh_path = v
     else:
