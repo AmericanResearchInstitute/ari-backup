@@ -143,11 +143,15 @@ class ARIBackup(object):
             self._process_post_job_hooks(error_case=True)
 
 
-    def _run_backup(self):
-        '''Run typical rdiff-backup backup job.
+    def _run_backup(self, top_level_src_dir='/'):
+        '''Run rdiff-backup job.
 
-        This generates an argument list as expected by rdiff_backup,
-        and then passes it directly to the rdiff_backup module
+        Builds an argument list for a full rdiff-backup command line based on
+        the settings in the instance and optionally the top_level_src_dir
+        parameter. Said parameter is used to define the context for the backup
+        mirror. This is especially handy when backing up mounted spanshots so
+        that the mirror doesn't contain the directory where the snapshot is
+        mounted.
 
         '''
         self.logger.info('_run_backup started')
@@ -197,12 +201,23 @@ class ARIBackup(object):
 
         # Add a source argument
         if self.source_hostname == 'localhost':
-            arg_list.append('/')
+            arg_list.append(top_level_src_dir)
         else:
-            arg_list.append('%s@%s::/' % (self.remote_user, self.source_hostname) )
+            arg_list.append(
+                '{remote_user}@{source_hostname}::{top_level_src_dir}'.format(
+                    remote_user = self.remote_user,
+                    source_hostname = self.source_hostname,
+                    top_level_src_dir = top_level_src_dir
+                )
+            )
 
         # Add a destination argument
-        arg_list.append('%s/%s' % ( settings.backup_store_path, self.label) )
+        arg_list.append(
+            '{backup_store_path}/{label}'.format(
+                backup_store_path = settings.backup_store_path,
+                label = self.label
+            )
+        )
 
         # Rdiff-backup GO!
         self._run_command(arg_list)
@@ -256,48 +271,34 @@ class LVMBackup(ARIBackup):
         self.snapshot_mount_point_base_path = os.path.join(settings.snapshot_mount_root, self.label)
         
         # setup pre and post job hooks to manage snapshot work flow
-        self.pre_job_hook_list.append((self._cook_lv_list, {}))
         self.pre_job_hook_list.append((self._create_snapshots, {}))
         self.pre_job_hook_list.append((self._mount_snapshots, {}))
         self.post_job_hook_list.append((self._umount_snapshots, {}))
         self.post_job_hook_list.append((self._delete_snapshots, {}))
  
 
-    def _cook_lv_list(self):
-        '''Turns self.lv_list into a list of dicts'''
-
-        new_lv_list = []
-        for volume in self.lv_list:
-            # add the values required by the user to our new dict
-            new_volume = {'lv_path': volume[0], 'mount_path': volume[1]}
-            # Add the values that are optional (i.e. mount options)
-            try:
-                new_volume.update({'mount_options': volume[2]})
-            except IndexError:
-                new_volume.update({'mount_options': None})
-
-            # add some sentinal values to help track snapshot workflow
-            new_volume.update({'created': False, 'mounted': False})
-
-        self.lv_list = new_lv_list
-
-
     def _create_snapshots(self):
         '''Creates snapshots of all the volumns listed in self.lv_list'''
 
         for volume in self.lv_list:
-            vg_name, lv_name = volume['lv_path'].split('/')
+            lv_path = volume[0]
+            vg_name, lv_name = lv_path.split('/')
             new_lv_name = lv_name + '-rdiff'
-            mount_path = '%s%s' % (self.snapshot_mount_point_base_path, volume['mount_path'])
+            mount_path = '%s%s' % (self.snapshot_mount_point_base_path, volume[1])
+            try:
+                mount_options = volume[2]
+            except IndexError:
+                mount_options = None
 
             # TODO Is it really OK to always make a 1GB exception table?
-            self._run_command('lvcreate -s -L 1G %s -n %s' % (volume['lv_path'], new_lv_name), self.source_hostname)
+            self._run_command('lvcreate -s -L 1G %s -n %s' % (lv_path, new_lv_name), self.source_hostname)
 
             self.lv_snapshots.append({
                 'lv_path': vg_name + '/' + new_lv_name,
                 'mount_path': mount_path,
-                'mount_options': volume['mount_options'],
+                'mount_options': mount_options,
                 'created': True,
+                'mount_point_created': False,
                 'mounted': False,
             })
 
@@ -317,27 +318,35 @@ class LVMBackup(ARIBackup):
     def _mount_snapshots(self):
         for snapshot in self.lv_snapshots:
             lv_path = snapshot['lv_path']
+            device_path = '/dev/' + lv_path
             mount_path = snapshot['mount_path']
             mount_options = snapshot['mount_options']
 
             # mkdir the mount point
-            self._run_command('mkdir -p %s' % mouth_path, self.source_hostname)
+            self._run_command('mkdir -p %s' % mount_path, self.source_hostname)
+            snapshot.update({'mount_point_created': True})
+
+            # This exception handling is unfortunately backwards. We want to
+            # ensure that our mount_path is not already a mount point, and if
+            # it's not, the following command will return a non-zero exit
+            # code, which will make _run_command() throw Exception.
+            try:
+                self._run_command('mountpoint -q %s' % mount_path)
+                raise Exception("{mount_path} is already a mount point".format(mount_path=mount_path))
+            except Exception:
+                pass
+                
             # mount the LV, possibly with mount options
-            # The 'mountpoint ... ||' syntax is used to ensure we don't mount
-            # where something's already mounted. TODO: If the target mountpoint
-            # is already a mount point, this currently fails silently
             if mount_options:
-                command = 'mountpoint -q %s || mount -o %s %s %s' % (
-                    mount_path,
-                    mount_options,
-                    '/dev/' + lv_path,
-                    mount_path
+                command = 'mount -o {mount_options} {device_path} {mount_path}'.format( 
+                    mount_options = mount_options,
+                    device_path = device_path,
+                    mount_path = mount_path
                 )
             else:
-                command = 'mountpoint -q %s || mount %s %s' % (
-                    mount_path,
-                    '/dev/' + lv_path,
-                    mount_path
+                command = 'mount {device_path} {mount_path}'.format(
+                    device_path = device_path,
+                    mount_path = mount_path
                 )
 
             self._run_command(command, self.source_hostname)
@@ -350,6 +359,11 @@ class LVMBackup(ARIBackup):
     	This method behaves the same in the normal and error cases.
     	
     	'''
+        # TODO If the user doesn't put '/' in their include_dir_list, then
+        # we'll end up with directories around where the snapshots are mounted
+        # that will not get cleaned up.  We should probably add functionality
+        # to make sure the "label" directory is recursively removed.
+
         # We need a local copy of the lv_snapshots list to muck with in
         # this method.
         local_lv_snapshots = self.lv_snapshots
@@ -357,11 +371,13 @@ class LVMBackup(ARIBackup):
         # that we umount the deepest paths first.
         local_lv_snapshots.reverse()
         for snapshot in local_lv_snapshots:
+            mount_path = snapshot['mount_path']
             if snapshot['mounted']:
-                mount_path = snapshot['mount_path']
                 self._run_command('umount %s' % mount_path, self.source_hostname)
                 snapshot.update({'mounted': False})
+            if snapshot['mount_point_created']:
                 self._run_command('rmdir %s' % mount_path, self.source_hostname)
+                snapshot.update({'mount_point_created': False})
 
 
     def _run_backup(self):
@@ -388,6 +404,6 @@ class LVMBackup(ARIBackup):
         # class as it would take extra effort and it's not likely to be used.
 
 		# Have the base class perform an rdiff-backup
-        super(self.__class__, self)._run_backup()
+        super(self.__class__, self)._run_backup(settings.snapshot_mount_root + '/' + self.label)
         
         self.logger.info('LVMBackup._run_backup completed')
