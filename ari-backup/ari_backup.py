@@ -252,37 +252,48 @@ class LVMBackup(ARIBackup):
         # a list of tuples with the snapshot paths and where they should be
         # mounted
         self.lv_snap_shots = []
-        self.snap_shot_mount_point_base_path = os.path.join(settings.remote_snapshot_mount_root, self.label)
+        self.snapshot_mount_point_base_path = os.path.join(settings.remote_snapshot_mount_root, self.label)
+        
+        # setup pre and post job hooks to manage snapshot work flow
+        self.pre_job_hook_list.append((self._create_snapshots, {}))
+        self.pre_job_hook_list.append((self._mount_snapshots, {}))
+        self.post_job_hook_list.append((self._umount_snapshots, {}))
+        self.post_job_hook_list.append((self._delete_snapshots, {}))
+ 
 
-
-    def _create_snap_shots(self):
+    def _create_snapshots(self):
         '''Creates snapshots of all the volumns listed in self.lvList.'''
 
         for volume in self.lv_list:
             vg_name, lv_name = volume[0].split('/')
             new_lv_name = lv_name + '-rdiff'
-            mount_path = '%s%s' % (self.snap_shot_mount_point_base_path, volume[1])
+            mount_path = '%s%s' % (self.snapshot_mount_point_base_path, volume[1])
 
             # volume[2] might be mount options for this LV. We'd like to pass
             # that info along, if available, to lv_snap_shots.
             try:
                 mount_options = v[2]
-                self.lv_snap_shots.append((vg_name + '/' + new_lv_name, mount_path, mount_options))
+                self.lv_snapshots.append((vg_name + '/' + new_lv_name, mount_path, mount_options))
             except IndexError:
-                self.lv_snap_shots.append((vg_name + '/' + new_lv_name, mount_path))
+                self.lv_snapshots.append((vg_name + '/' + new_lv_name, mount_path))
 
             # TODO Is it really OK to always make a 1GB exception table?
             self._run_command('lvcreate -s -L 1G %s -n %s' % (volume[0], new_lv_name), self.source_hostname)
 
 
-    def _delete_snap_shots(self):
-        for volume in self.lv_snap_shots:
+    def _delete_snapshots(self, error_case=None):
+    	'''Deletes snapshots in self.lv_snap_shots
+    	
+    	This method behaves the same in the normal and error cases.
+    	
+    	'''
+        for volume in self.lv_snapshots:
             lv_path = volume[0]
             self._run_command('lvremove -f %s' % lv_path, self.source_hostname)
 
 
-    def _mount_snap_shots(self):
-        for volume in self.lv_snap_shots:
+    def _mount_snapshots(self):
+        for volume in self.lv_snapshots:
             lv_path = volume[0]
             mount_path = volume[1]
 
@@ -303,13 +314,18 @@ class LVMBackup(ARIBackup):
                 )
 
 
-    def _umount_snap_shots(self):
+    def _umount_snapshots(self, error_case=None):
+    	'''Umounts mounted snapshots in self.lv_snap_shots
+    	
+    	This method behaves the same in the normal and error cases.
+    	
+    	'''
         # We need a local copy of the lv_snap_shots list to muck with in
         # this method.
-        local_lv_snap_shots = self.lv_snap_shots
+        local_lv_snapshots = self.lv_snap_shots
         # We want to umount these LVs in reverse order as this should ensure
         # that we umount the deepest paths first.
-        local_lv_snap_shots.reverse()
+        local_lv_snapshots.reverse()
         for volume in local_lv_snap_shots:
             mount_path = volume[1]
             
@@ -317,59 +333,30 @@ class LVMBackup(ARIBackup):
             self._run_command('rmdir %s' % mount_path, self.source_hostname)
 
 
-# MARK
-    def runSnapShotBackup(self):
-        '''Run backup of LVM snapshots
-
-        This generates an argument list as expected by rdiff_backup,
-        and then passes it directly to the rdiff_backup module
-
-        '''
+    def _run_backup(self):
+        '''Run backup of LVM snapshots'''
+        
         # TODO Maybe convert lv_list into a dictionary since friendly key names
         # would be very handy within this class's methods.
-        self.logger.info('runSnapShotBackup started')
+        self.logger.info('LVMBackup._run_backup started')
+        
+        # Cook the self.include_dir_list and self.exclude_dir_list so that the
+        # src paths include the mount path for the LV(s).
+        local_include_dir_list = []
+        for include_dir in self.include_dir_list:
+            local_include_dir_list.append('%s%s' % (self.snapshot_mount_point_base_path, include_dir))
+        
+        local_exclude_dir_list = []
+        for exclude_dir in self.exclude_dir_list:
+        	local_exclude_dir_list.append('%s%s' % (self.snapshot_mount_point_base_path, exclude_dir))
+        	
+        self.include_dir_list = local_include_dir_list
+        self.exclude_dir_list = local_exclude_dir_list
 
-        if not self.sshCompression:
-            self.argList.append('--ssh-no-compression')
+        # We don't support include_file_list and exclude_file_list in this
+        # class as it would take extra effort and it's not likely to be used.
 
-        self._createSnapShots()
-        self._mountSnapShots()
-
-        # Populate self.argument list
-        for includeDir in self.includeDirList:
-            includeDir = '%s%s' % (self.snapShotMountPointBasePath, includeDir)
-            self.argList.append('--include')
-            self.argList.append(includeDir.replace(' ', '\x20'))
-
-        for excludeDir in self.excludeDirList:
-            excludeDir = '%s%s' % (self.snapShotMountPointBasePath, excludeDir)
-            self.argList.append('--exclude')
-            self.argList.append(excludeDir)
-
-        # I removed support for the includeFileList and excludeFileList in this
-        # method, as it would take some cooking and I doubt we'll use it.
-
-        # Exclude everything else
-        self.argList.append('--exclude')
-        self.argList.append('**')
-
-        # Configure a tmpdir on the backup volume
-        # TODO Custom Tempdir not supported until rdiff-backup 1.1.13
-        # self.argList.append('--tempdir')
-        # self.argList.append(self.backupTmp)
-
-        # Let rdiff know where it's aimed
-        self.argList.append('%s@%s::%s' % (self.userName, self.vmHostName, self.snapShotMountPointBasePath) )
-        self.argList.append('%s/%s' % ( self.backupStore, self.hostName) )
-
-        # Call rdiff-backup, spawning a new thread and waiting for it
-        # to execute before finishing
-        try:
-            rdiff_backup.Main.error_check_Main(self.argList)
-        except:
-            exit(self.logger, 'An unforseen excpetion has arisen. Exiting.')
-
-        self._umountSnapShots()
-        self._deleteSnapShots()
-
-        self.logger.info('runSnapShotBackup completed')
+		# Have the base class perform an rdiff-backup
+        super(self.__class__, self)._run_backup()
+        
+        self.logger.info('LVMBackup._run_backup completed')
