@@ -241,61 +241,83 @@ class ARIBackup(object):
 class LVMBackup(ARIBackup):
     def __init__(self, source_hostname, label):
         super(self.__class__, self).__init__(source_hostname, label)
-        # This is a list of 2-tuples, where each inner 2-tuple expresses the lv to back up, and
-        # the mount point for that LV. For example, (('hostname/root, '/'),)
+
+        # This is a list of 2-tuples, where each inner 2-tuple expresses the LV
+        # to back up, the mount point for that LV any mount options necessary.
+        # For example: [('hostname/root, '/', 'noatime'),]
+        # TODO I wonder if noatime being used all the time makes sense to
+        # improve read performance and reduce writes to the snapshots.
         self.lv_list = []
+
         # a list of tuples with the snapshot paths and where they should be
         # mounted
         self.lv_snap_shots = []
         self.snap_shot_mount_point_base_path = os.path.join(settings.remote_snapshot_mount_root, self.label)
 
+
     def _create_snap_shots(self):
         '''Creates snapshots of all the volumns listed in self.lvList.'''
-        for v in self.lv_list:
-            vg_name, lv_name = v[0].split('/')
-            new_lv_name = lv_name + '-rdiff'
-            mount_path = '%s%s' % (self.snap_shot_mount_point_base_path, v[1])
 
-            # v[2] might be mount options for this LV. We'd like to pass that info along if available
-            # to lvSnapShots.
+        for volume in self.lv_list:
+            vg_name, lv_name = volume[0].split('/')
+            new_lv_name = lv_name + '-rdiff'
+            mount_path = '%s%s' % (self.snap_shot_mount_point_base_path, volume[1])
+
+            # volume[2] might be mount options for this LV. We'd like to pass
+            # that info along, if available, to lv_snap_shots.
             try:
-                self.lv_snap_shots.append((vg_name + '/' + new_lv_name, mount_path, v[2]))
+                mount_options = v[2]
+                self.lv_snap_shots.append((vg_name + '/' + new_lv_name, mount_path, mount_options))
             except IndexError:
                 self.lv_snap_shots.append((vg_name + '/' + new_lv_name, mount_path))
 
-            self.runJobOnVMHost('lvcreate -s -L 1G %s -n %s' % (v[0], newLVName))
+            # TODO Is it really OK to always make a 1GB exception table?
+            self._run_command('lvcreate -s -L 1G %s -n %s' % (volume[0], new_lv_name), self.source_hostname)
 
-    def _deleteSnapShots(self):
-        for v in self.lvSnapShots:
-            # the -f will only
-            self.runJobOnVMHost('lvremove -f %s' % v[0])
 
-    def _mountSnapShots(self):
-        for v in self.lvSnapShots:
+    def _delete_snap_shots(self):
+        for volume in self.lv_snap_shots:
+            lv_path = volume[0]
+            self._run_command('lvremove -f %s' % lv_path, self.source_hostname)
+
+
+    def _mount_snap_shots(self):
+        for volume in self.lv_snap_shots:
+            lv_path = volume[0]
+            mount_path = volume[1]
+
             # mkdir the mount point
-            self.runJobOnVMHost('mkdir -p %s' % v[1])
+            self._run_command('mkdir -p %s' % mouth_path, self.source_hostname)
             # mount the LV, possibly with mount options
             # The 'mountpoint ... ||' syntax is used to ensure we don't mount
             # where something's already mounted. TODO: If the target mountpoint
             # is already a mount point, this currently fails silently
             try:
-                self.runJobOnVMHost('mountpoint -q %s || mount -o %s %s %s' %
-                        (v[1], v[2], '/dev/' + v[0], v[1])
+                mount_options = volume[2]
+                self._run_command('mountpoint -q %s || mount -o %s %s %s' %
+                    (mount_path, mount_options, '/dev/' + lv_path, mount_path), self.source_hostname
                 )
             except IndexError:
-                self.runJobOnVMHost('mountpoint -q %s || mount %s %s' %
-                        (v[1], '/dev/' + v[0], v[1])
+                self._run_command('mountpoint -q %s || mount %s %s' %
+                    (mount_path, '/dev/' + lv_path, mount_path), self.source_hostname
                 )
 
-    def _umountSnapShots(self):
-        localLVSnapShots = self.lvSnapShots
-        # we want to umount these LVs in reverse order as this should ensure
-        # that we umount the deepest paths first
-        localLVSnapShots.reverse()
-        for v in localLVSnapShots:
-            self.runJobOnVMHost('umount %s' % v[1])
-            self.runJobOnVMHost('rmdir %s' % v[1])
 
+    def _umount_snap_shots(self):
+        # We need a local copy of the lv_snap_shots list to muck with in
+        # this method.
+        local_lv_snap_shots = self.lv_snap_shots
+        # We want to umount these LVs in reverse order as this should ensure
+        # that we umount the deepest paths first.
+        local_lv_snap_shots.reverse()
+        for volume in local_lv_snap_shots:
+            mount_path = volume[1]
+            
+            self._run_command('umount %s' % mount_path, self.source_hostname)
+            self._run_command('rmdir %s' % mount_path, self.source_hostname)
+
+
+# MARK
     def runSnapShotBackup(self):
         '''Run backup of LVM snapshots
 
@@ -303,6 +325,8 @@ class LVMBackup(ARIBackup):
         and then passes it directly to the rdiff_backup module
 
         '''
+        # TODO Maybe convert lv_list into a dictionary since friendly key names
+        # would be very handy within this class's methods.
         self.logger.info('runSnapShotBackup started')
 
         if not self.sshCompression:
