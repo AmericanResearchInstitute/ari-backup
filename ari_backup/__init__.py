@@ -111,7 +111,14 @@ class ARIBackup(object):
         try:
             self.logger.info('_run_command %r' % args)
             p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            stdout, stderr = p.communicate()
+            # We really want to block until our subprocess exists on
+            # KeyboardInterrupt. If we don't, clean up tasks can likely fail.
+            try:
+                stdout, stderr = p.communicate()
+            except KeyboardInterrupt:
+                # TODO terminate() doesn't block, so we'll need to poll
+                p.terminate()
+                raise KeyboardInterrupt
 
             if stdout:
                 self.logger.info(stdout)
@@ -260,7 +267,7 @@ class ARIBackup(object):
 
 class LVMBackup(ARIBackup):
     def __init__(self, source_hostname, label, remove_older_than_timespec=None):
-        super(self.__class__, self).__init__(source_hostname, label, remove_older_than_timespec)
+        super(LVMBackup, self).__init__(source_hostname, label, remove_older_than_timespec)
 
         # This is a list of 2-tuples, where each inner 2-tuple expresses the LV
         # to back up, the mount point for that LV any mount options necessary.
@@ -287,7 +294,7 @@ class LVMBackup(ARIBackup):
         for volume in self.lv_list:
             lv_path = volume[0]
             vg_name, lv_name = lv_path.split('/')
-            new_lv_name = lv_name + '-rdiff'
+            new_lv_name = lv_name + settings.snapshot_suffix
             mount_path = '%s%s' % (self.snapshot_mount_point_base_path, volume[1])
             try:
                 mount_options = volume[2]
@@ -377,7 +384,7 @@ class LVMBackup(ARIBackup):
         for snapshot in local_lv_snapshots:
             mount_path = snapshot['mount_path']
             if snapshot['mounted']:
-                self._run_command('umount %s' % mount_path, self.source_hostname)
+                self._run_command('umount -l %s' % mount_path, self.source_hostname)
                 snapshot.update({'mounted': False})
             if snapshot['mount_point_created']:
                 self._run_command('rmdir %s' % mount_path, self.source_hostname)

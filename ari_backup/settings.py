@@ -1,6 +1,6 @@
-import yaml
-
 from __future__ import with_statement
+
+import yaml
 from logger import Logger
 
 # Reads and validates settings from /etc/ari-backup/ari-backup.conf.yaml and
@@ -11,6 +11,8 @@ rdiff_backup_path = '/usr/bin/rdiff-backup'
 remote_user = 'root'
 ssh_path = '/usr/bin/ssh'
 ssh_compression = False
+snapshot_suffix = '-ari_backup'
+rsync_path = '/usr/bin/rsync'
 
 # setup logging
 log = Logger('ARIBackup (settings)')
@@ -25,9 +27,10 @@ for k, v in conf.iteritems():
     if k == 'backup_store_path': backup_store_path = v
     elif k == 'rdiff_backup_path': rdiff_backup_path = v
     elif k == 'remote_user': remote_user = v
-    elif k == 'snapshot_mount_root': snapshot_mount_root = v
     elif k == 'ssh_compression': ssh_compression = v
     elif k == 'ssh_path': ssh_path = v
+    elif k == 'snapshot_mount_root': snapshot_mount_root = v
+    elif k == 'snapshot_suffix': snapshot_suffix = v
     elif k == 'rsync_path': rsync_path = v
     elif k == 'rsync_options': rsync_options = v
     else:
