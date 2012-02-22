@@ -391,8 +391,6 @@ class LVMBackup(ARIBackup):
     def _run_backup(self):
         '''Run backup of LVM snapshots'''
         
-        # TODO Maybe convert lv_list into a dictionary since friendly key names
-        # would be very handy within this class's methods.
         self.logger.info('LVMBackup._run_backup started')
         
         # Cook the self.include_dir_list and self.exclude_dir_list so that the
