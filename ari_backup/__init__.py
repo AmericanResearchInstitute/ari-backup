@@ -2,36 +2,32 @@ import os
 import settings
 import subprocess
 import shlex
-import sys
 
 from logger import Logger
 
-def exit(logger, message, error=True):
-    '''Wrapper around sys.exit to faciliate good logging
+'''Wrapper around rdiff-backup
 
-    This just functionalizes some code that gets used a lot in here,
-    logging a message and appropriately exiting.
+This module provides facilites for centrally managing a large set of
+rdiff-backup backup jobs.  Backup job management is built around common tools
+like cron, run-parts, and xargs.  The base features includes:
+* central configuration file
+* backup jobs for local and remote hosts
+* configurable job parallelization
+* ability to run arbitrary commands locally or remotely before and after
+  backup jobs (something especially handy for preparing databases pre-backup)
+* logging to syslog
 
-    It default to an error on exit, but can be used to exit nicely.
-    Usually (always?) an errorless exit means "keep going", though.
+The base features are designed to be extended and we include an extension to
+manage the setup and tear down of LVM snapshots for backup.
 
-    '''
-    # Make sure to stringify the message, sometimes we just get ints back :(
-    message = str(message)
-    if error:
-        logger.error(message)
-        sys.exit(1)
-    else:
-        logger.info(message)
-        sys.exit(0)
+'''
 
 class ARIBackup(object):
-    '''Wrapper around rdiff-backup
+    '''Base class includes core features and basic rdiff-backup functionality
 
-    It provides facilities to run remote backups with additional custom
-    features to help manage LVM snapshots for backup purposes. It was written
-    with a Xen/LVM type environment in mind. Arbitrary remote job execution
-    is also provided.
+    This class can be used if all that is needed is to leverage the basic
+    rdiff-backup features.  The pre and post hook functionality as well as
+    command execution is also part of this class.
 
     '''
     def __init__(self, label, source_hostname, remove_older_than_timespec=None):
@@ -125,7 +121,7 @@ class ARIBackup(object):
                 self.logger.warning(stderr)
             exitcode = p.returncode
         except IOError:
-            exit(self.logger, 'Unable to execute %s. Exiting' % args)
+            raise Exception('Unable to execute/find {args}'.format(args=args))
 
         if exitcode > 0:
             error_message = ('[{host}] A command terminated with errors and likely requires intervention. The '
@@ -277,7 +273,7 @@ class LVMBackup(ARIBackup):
         # mounted
         self.lv_snapshots = []
         self.snapshot_mount_point_base_path = os.path.join(settings.snapshot_mount_root, self.label)
-        
+
         # setup pre and post job hooks to manage snapshot work flow
         self.pre_job_hook_list.append((self._create_snapshots, {}))
         self.pre_job_hook_list.append((self._mount_snapshots, {}))
@@ -410,6 +406,6 @@ class LVMBackup(ARIBackup):
         # class as it would take extra effort and it's not likely to be used.
 
 		# Have the base class perform an rdiff-backup
-        super(self.__class__, self)._run_backup(settings.snapshot_mount_root + '/' + self.label)
+        super(self.__class__, self)._run_backup(self.snapshot_mount_point_base_path)
         
         self.logger.info('LVMBackup._run_backup completed')
