@@ -384,7 +384,7 @@ class LVMBackup(ARIBackup):
         for snapshot in local_lv_snapshots:
             mount_path = snapshot['mount_path']
             if snapshot['mounted']:
-                self._run_command('umount -l %s' % mount_path, self.source_hostname)
+                self._run_command('umount %s' % mount_path, self.source_hostname)
                 snapshot.update({'mounted': False})
             if snapshot['mount_point_created']:
                 self._run_command('rmdir %s' % mount_path, self.source_hostname)
