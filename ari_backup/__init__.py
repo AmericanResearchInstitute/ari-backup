@@ -120,7 +120,9 @@ class ARIBackup(object):
             if stdout:
                 self.logger.info(stdout)
             if stderr:
-                self.logger.error(stderr)
+                # Warning level should be fine here since we'll also look at
+                # the exitcode.
+                self.logger.warning(stderr)
             exitcode = p.returncode
         except IOError:
             exit(self.logger, 'Unable to execute %s. Exiting' % args)
@@ -139,7 +141,13 @@ class ARIBackup(object):
             self._process_post_job_hooks()
         except Exception, e:
             self.logger.error((str(e)))
-            self.logger.error('performing clean up...')
+            self.logger.info("let's try to clean up...")
+            self._process_post_job_hooks(error_case=True)
+        except KeyboardInterrupt:
+            # using error lvl here so that these messages will
+            # print to the console
+            self.logger.error('backup job cancelled by user')
+            self.logger.error("let's try to clean up...")
             self._process_post_job_hooks(error_case=True)
 
 
