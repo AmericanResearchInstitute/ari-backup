@@ -3,9 +3,9 @@ from datetime import datetime, timedelta
 from ari_backup import LVMBackup, settings
 
 class ZFSLVMBackup(LVMBackup):
-    def __init__(self, label, source_hostname, rsync_dst_url, zfs_hostname, dataset_name, snapshot_expiration_days):
+    def __init__(self, label, source_hostname, rsync_dst, zfs_hostname, dataset_name, snapshot_expiration_days):
         # assign instance vars specific to this class
-        self.rsync_dst_url = rsync_dst_url
+        self.rsync_dst = rsync_dst
         self.zfs_hostname = zfs_hostname
         self.dataset_name = dataset_name
 
@@ -45,7 +45,7 @@ class ZFSLVMBackup(LVMBackup):
             rsync_path = settings.rsync_path,
             rsync_options = self.rsync_options,
             src = rsync_src,
-            dst = self.rsync_dst_url
+            dst = self.rsync_dst
         )
 
         self.logger.info(command)
@@ -69,6 +69,7 @@ class ZFSLVMBackup(LVMBackup):
             # Let's find all the snapshots for this dataset
             command = 'zfs get -rH -o name,value type {dataset_name}'.format(dataset_name=self.dataset_name)
             (stdout, stderr) = self._run_command(command, self.zfs_hostname)
+
             snapshots = []
             for line in stdout.split('\n'):
                 name, dataset_type = line.split('\t')
