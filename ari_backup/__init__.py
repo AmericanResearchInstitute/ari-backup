@@ -9,7 +9,7 @@ from logger import Logger
 
 This module provides facilites for centrally managing a large set of
 rdiff-backup backup jobs.  Backup job management is built around common tools
-like cron, run-parts, and xargs.  The base features includes:
+like cron, run-parts, and xargs.  The base features include:
 * central configuration file
 * backup jobs for local and remote hosts
 * configurable job parallelization
@@ -277,6 +277,7 @@ class LVMBackup(ARIBackup):
         # a list of dicts with the snapshot paths and where they should be
         # mounted
         self.lv_snapshots = []
+        # mount the snapshots in a directory named for this job's label
         self.snapshot_mount_point_base_path = os.path.join(settings.snapshot_mount_root, self.label)
 
         # setup pre and post job hooks to manage snapshot work flow
@@ -397,7 +398,7 @@ class LVMBackup(ARIBackup):
     def _run_backup(self):
         '''Run backup of LVM snapshots'''
         
-        self.logger.info('LVMBackup._run_backup started')
+        self.logger.debug('LVMBackup._run_backup started')
         
         # Cook the self.include_dir_list and self.exclude_dir_list so that the
         # src paths include the mount path for the LV(s).
@@ -416,6 +417,6 @@ class LVMBackup(ARIBackup):
         # class as it would take extra effort and it's not likely to be used.
 
 		# Have the base class perform an rdiff-backup
-        super(self.__class__, self)._run_backup(self.snapshot_mount_point_base_path)
+        super(LVMBackup, self)._run_backup(self.snapshot_mount_point_base_path)
         
-        self.logger.info('LVMBackup._run_backup completed')
+        self.logger.debug('LVMBackup._run_backup completed')
