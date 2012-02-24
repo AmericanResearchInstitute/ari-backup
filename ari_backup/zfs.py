@@ -58,8 +58,7 @@ class ZFSLVMBackup(LVMBackup):
             command = 'zfs snapshot {dataset_name}@{snapshot_name}'.format(
                 dataset_name=self.dataset_name, snapshot_name=snapshot_name)
 
-            self.logger.info(command)
-            #self._run_command(command, self.zfs_hostname)
+            self._run_command(command, self.zfs_hostname)
 
 
     def _remove_zfs_snapshots_older_than(self, days, error_case):
@@ -71,7 +70,9 @@ class ZFSLVMBackup(LVMBackup):
             (stdout, stderr) = self._run_command(command, self.zfs_hostname)
 
             snapshots = []
-            for line in stdout.split('\n'):
+            # Sometimes we get extra lines which are empty,
+            # so we'll strip the lines.
+            for line in stdout.strip().split('\n'):
                 name, dataset_type = line.split('\t')
                 if dataset_type == 'snapshot':
                     # Let's try to only consider destroying snapshots made by us ;)
@@ -82,7 +83,6 @@ class ZFSLVMBackup(LVMBackup):
             for snapshot in snapshots:
                 command = 'zfs get -H -o value creation {snapshot}'.format(snapshot=snapshot)
                 (stdout, stderr) = self._run_command(command, self.zfs_hostname)
-                creation_time = datetime.strptime(stdout.strip(), '%a %b %m  %H:M %Y')
+                creation_time = datetime.strptime(stdout.strip(), '%a %b %d %H:%M %Y')
                 if creation_time <= expiration:
-                    self.logger.info(command)
-                    #self._run_command('zfs destroy {snapshot}'.format(snapshot=snapshot)
+                    self._run_command('zfs destroy {snapshot}'.format(snapshot=snapshot))
