@@ -62,8 +62,6 @@ class ARIBackup(object):
                 self._remove_older_than,
                 {'timespec': remove_older_than_timespec}))
 
-        self.logger.info('initialized')
-
 
     def _process_pre_job_hooks(self):
         self.logger.info('processing pre-job hooks...')
@@ -112,7 +110,7 @@ class ARIBackup(object):
             args = ssh_args + args
 
         try:
-            self.logger.info('_run_command %r' % args)
+            self.logger.debug('_run_command %r' % args)
             p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             # We really want to block until our subprocess exists on
             # KeyboardInterrupt. If we don't, clean up tasks can likely fail.
@@ -124,7 +122,7 @@ class ARIBackup(object):
                 raise KeyboardInterrupt
 
             if stdout:
-                self.logger.info(stdout)
+                self.logger.debug(stdout)
             if stderr:
                 # Warning level should be fine here since we'll also look at
                 # the exitcode.
@@ -143,9 +141,12 @@ class ARIBackup(object):
 
 
     def run_backup(self):
+        self.logger.info('started')
         try:
             self._process_pre_job_hooks()
+            self.logger.info('data backup started')
             self._run_backup()
+            self.logger.info('data backup complete')
             self._process_post_job_hooks()
         except Exception, e:
             self.logger.error((str(e)))
@@ -157,6 +158,8 @@ class ARIBackup(object):
             self.logger.error('backup job cancelled by user')
             self.logger.error("let's try to clean up...")
             self._process_post_job_hooks(error_case=True)
+        finally:
+            self.logger.info('stopped')
 
 
     def _run_backup(self, top_level_src_dir='/'):
@@ -170,7 +173,7 @@ class ARIBackup(object):
         mounted.
 
         '''
-        self.logger.info('_run_backup started')
+        self.logger.debug('_run_backup started')
 
         # Init our arguments list with the path to rdiff-backup.
         # This will be in the format we'd normally pass to the command-line
@@ -237,7 +240,7 @@ class ARIBackup(object):
 
         # Rdiff-backup GO!
         self._run_command(arg_list)
-        self.logger.info('_run_backup completed')
+        self.logger.debug('_run_backup completed')
 
 
     def _remove_older_than(self, timespec, error_case):
@@ -258,16 +261,6 @@ class ARIBackup(object):
 
             self._run_command(arg_list)
             self.logger.info('remove_older_than %s completed' % timespec)
-
-
-    def __del__(self):
-        '''Our deconstructor, mostly for logging that things have stopped.
-
-        This is especially useful for knowing that the script has
-        abruptly stopped due to a syntax error or something similar.
-
-        '''
-        self.logger.info('stopped')
 
 
 class LVMBackup(ARIBackup):
@@ -296,6 +289,7 @@ class LVMBackup(ARIBackup):
     def _create_snapshots(self):
         '''Creates snapshots of all the volumns listed in self.lv_list'''
 
+        self.logger.info('creating LVM snapshots...')
         for volume in self.lv_list:
             lv_path = volume[0]
             vg_name, lv_name = lv_path.split('/')
@@ -325,13 +319,16 @@ class LVMBackup(ARIBackup):
     	This method behaves the same in the normal and error cases.
     	
     	'''
+        self.logger.info('deleting LVM snapshots...')
         for snapshot in self.lv_snapshots:
             if snapshot['created']:
-                self._run_command('lvremove -f %s' % snapshot['lv_path'], self.source_hostname)
+                lv_path = snapshot['lv_path']
+                self._run_command('lvremove -f %s' % lv_path, self.source_hostname)
                 snapshot.update({'created': False})
 
 
     def _mount_snapshots(self):
+        self.logger.info('mounting LVM snapshots...')
         for snapshot in self.lv_snapshots:
             lv_path = snapshot['lv_path']
             device_path = '/dev/' + lv_path
@@ -380,6 +377,7 @@ class LVMBackup(ARIBackup):
         # that will not get cleaned up.  We should probably add functionality
         # to make sure the "label" directory is recursively removed.
 
+        self.logger.info('umounting LVM snapshots...')
         # We need a local copy of the lv_snapshots list to muck with in
         # this method.
         local_lv_snapshots = self.lv_snapshots

@@ -29,6 +29,7 @@ class ZFSLVMBackup(LVMBackup):
         # TODO Throw an exception if we see things in the include or exclude
         # lists since we don't use them in this class?
 
+        self.logger.debug('ZFSLVMBackup._run_backup started')
         # We add a trailing slash to the src path otherwise rsync will make a
         # subdirectory at the destination, even if the destination is already
         # a directory.
@@ -48,12 +49,13 @@ class ZFSLVMBackup(LVMBackup):
             dst = self.rsync_dst
         )
 
-        self.logger.info(command)
-        #self._run_command(command)
+        self._run_command(command)
+        self.logger.debug('ZFSLVMBackup._run_backup completed')
 
 
     def _create_zfs_snapshot(self, error_case):
         if not error_case:
+            self.logger.info('creating ZFS snapshot...')
             snapshot_name = self.snapshot_prefix + datetime.now().strftime(self.snapshot_timestamp_format)
             command = 'zfs snapshot {dataset_name}@{snapshot_name}'.format(
                 dataset_name=self.dataset_name, snapshot_name=snapshot_name)
@@ -63,6 +65,7 @@ class ZFSLVMBackup(LVMBackup):
 
     def _remove_zfs_snapshots_older_than(self, days, error_case):
         if not error_case:
+            self.logger.info('removing expired ZFS snapshots...')
             expiration = datetime.now() - timedelta(days=days)
 
             # Let's find all the snapshots for this dataset
@@ -85,4 +88,5 @@ class ZFSLVMBackup(LVMBackup):
                 (stdout, stderr) = self._run_command(command, self.zfs_hostname)
                 creation_time = datetime.strptime(stdout.strip(), '%a %b %d %H:%M %Y')
                 if creation_time <= expiration:
-                    self._run_command('zfs destroy {snapshot}'.format(snapshot=snapshot))
+                    self._run_command('zfs destroy {snapshot}'.format(snapshot=snapshot), self.zfs_hostname)
+                    self.logger.info('{snapshot} destroyed'.format(snapshot=snapshot))
