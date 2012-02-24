@@ -1,6 +1,7 @@
 from __future__ import with_statement
 
 import yaml
+
 from logger import Logger
 
 # Reads and validates settings from /etc/ari-backup/ari-backup.conf.yaml and
@@ -14,6 +15,7 @@ ssh_compression = False
 snapshot_suffix = '-ari_backup'
 rsync_path = '/usr/bin/rsync'
 zfs_snapshot_prefix = 'ari-backup-'
+debug_logging = False
 
 # setup logging
 log = Logger('ARIBackup (settings)')
@@ -35,8 +37,6 @@ for k, v in conf.iteritems():
     elif k == 'rsync_path': rsync_path = v
     elif k == 'rsync_options': rsync_options = v
     elif k == 'zfs_snapshot_prefix': zfs_snapshot_prefix = v
+    elif k == 'debug_logging': debug_logging = v
     else:
         log.warning('{key}:{value} is not a recognized setting'.format(key=k, value=v))
-
-# TODO How can we support a logging_level setting with Python logging using
-# its own constants that are hard to reference in YAML?

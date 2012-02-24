@@ -43,7 +43,7 @@ class ARIBackup(object):
         self.remote_user = settings.remote_user
 
         # setup logging
-        self.logger = Logger('ARIBackup ({label})'.format(label=label))
+        self.logger = Logger('ARIBackup ({label})'.format(label=label), settings.debug_logging)
 
         # Include nothing by default
         self.include_dir_list = []
@@ -74,7 +74,7 @@ class ARIBackup(object):
 
     def _process_post_job_hooks(self, error_case=False):
         if error_case:
-            self.logger.info('processing post-job hooks for error case...')
+            self.logger.error('processing post-job hooks for error case...')
         else:
             self.logger.info('processing post-job hooks...')
 
@@ -97,9 +97,9 @@ class ARIBackup(object):
 
         '''
         # make args a list if it's not already so
-        if type(command) == str:
+        if isinstance(command, basestring):
             args = shlex.split(command)
-        elif type(command) == list:
+        elif isinstance(command, list):
             args = command
         else:
             raise Exception('_run_command: command arg must be str or list')
@@ -144,7 +144,7 @@ class ARIBackup(object):
         self.logger.info('started')
         try:
             self._process_pre_job_hooks()
-            self.logger.info('data backup started')
+            self.logger.info('data backup started...')
             self._run_backup()
             self.logger.info('data backup complete')
             self._process_post_job_hooks()
@@ -153,7 +153,7 @@ class ARIBackup(object):
             self.logger.info("let's try to clean up...")
             self._process_post_job_hooks(error_case=True)
         except KeyboardInterrupt:
-            # using error lvl here so that these messages will
+            # using error level here so that these messages will
             # print to the console
             self.logger.error('backup job cancelled by user')
             self.logger.error("let's try to clean up...")
@@ -206,9 +206,7 @@ class ARIBackup(object):
 
         for include_dir in self.include_dir_list:
             arg_list.append('--include')
-            # TODO: Is this \x20 dealio important?
-            # If so, shouldn't it be on exclude_dir too?
-            arg_list.append(include_dir.replace(' ', '\x20'))
+            arg_list.append(include_dir)
 
         for include_file in self.include_file_list:
             arg_list.append('--include-filelist')
@@ -224,17 +222,17 @@ class ARIBackup(object):
         else:
             arg_list.append(
                 '{remote_user}@{source_hostname}::{top_level_src_dir}'.format(
-                    remote_user = self.remote_user,
-                    source_hostname = self.source_hostname,
-                    top_level_src_dir = top_level_src_dir
+                    remote_user=self.remote_user,
+                    source_hostname=self.source_hostname,
+                    top_level_src_dir=top_level_src_dir
                 )
             )
 
         # Add a destination argument
         arg_list.append(
             '{backup_store_path}/{label}'.format(
-                backup_store_path = settings.backup_store_path,
-                label = self.label
+                backup_store_path=settings.backup_store_path,
+                label=self.label
             )
         )
 
@@ -292,14 +290,18 @@ class LVMBackup(ARIBackup):
 
         self.logger.info('creating LVM snapshots...')
         for volume in self.lv_list:
-            lv_path = volume[0]
+            try:
+                lv_path, src_mount_path, mount_options = volume
+            except ValueError:
+                lv_path, src_mount_path = volume
+                mount_options = None
+
             vg_name, lv_name = lv_path.split('/')
             new_lv_name = lv_name + settings.snapshot_suffix
-            mount_path = '%s%s' % (self.snapshot_mount_point_base_path, volume[1])
-            try:
-                mount_options = volume[2]
-            except IndexError:
-                mount_options = None
+            mount_path = '{snapshot_mount_point_base_path}{src_mount_path}'.format(
+                snapshot_mount_point_base_path=self.snapshot_mount_point_base_path,
+                src_mount_path=src_mount_path
+            )
 
             # TODO Is it really OK to always make a 1GB exception table?
             self._run_command('lvcreate -s -L 1G %s -n %s' % (lv_path, new_lv_name), self.source_hostname)
@@ -324,6 +326,7 @@ class LVMBackup(ARIBackup):
         for snapshot in self.lv_snapshots:
             if snapshot['created']:
                 lv_path = snapshot['lv_path']
+                # -f makes lvremove not interactive
                 self._run_command('lvremove -f %s' % lv_path, self.source_hostname)
                 snapshot.update({'created': False})
 
@@ -340,27 +343,22 @@ class LVMBackup(ARIBackup):
             self._run_command('mkdir -p %s' % mount_path, self.source_hostname)
             snapshot.update({'mount_point_created': True})
 
-            # This exception handling is unfortunately backwards. We want to
-            # ensure that our mount_path is not already a mount point, and if
-            # it's not, the following command will return a non-zero exit
-            # code, which will make _run_command() throw Exception.
-            try:
-                self._run_command('mountpoint -q %s' % mount_path)
+            # If where we want to mount our LV is already a mount point then
+            # let's back out.
+            if os.path.ismount(mount_path):
                 raise Exception("{mount_path} is already a mount point".format(mount_path=mount_path))
-            except Exception:
-                pass
                 
             # mount the LV, possibly with mount options
             if mount_options:
                 command = 'mount -o {mount_options} {device_path} {mount_path}'.format( 
-                    mount_options = mount_options,
-                    device_path = device_path,
-                    mount_path = mount_path
+                    mount_options=mount_options,
+                    device_path=device_path,
+                    mount_path=mount_path
                 )
             else:
                 command = 'mount {device_path} {mount_path}'.format(
-                    device_path = device_path,
-                    mount_path = mount_path
+                    device_path=device_path,
+                    mount_path=mount_path
                 )
 
             self._run_command(command, self.source_hostname)
@@ -377,6 +375,7 @@ class LVMBackup(ARIBackup):
         # we'll end up with directories around where the snapshots are mounted
         # that will not get cleaned up.  We should probably add functionality
         # to make sure the "label" directory is recursively removed.
+        # Check out shutil.rmtree() to help resolve this issue.
 
         self.logger.info('umounting LVM snapshots...')
         # We need a local copy of the lv_snapshots list to muck with in
@@ -404,11 +403,17 @@ class LVMBackup(ARIBackup):
         # src paths include the mount path for the LV(s).
         local_include_dir_list = []
         for include_dir in self.include_dir_list:
-            local_include_dir_list.append('%s%s' % (self.snapshot_mount_point_base_path, include_dir))
+            local_include_dir_list.append('{snapshot_mount_point_base_path}{include_dir}'.format(
+                snapshot_mount_point_base_path=snapshot_mount_point_base_path,
+                include_dir=include_dir
+            ))
         
         local_exclude_dir_list = []
         for exclude_dir in self.exclude_dir_list:
-        	local_exclude_dir_list.append('%s%s' % (self.snapshot_mount_point_base_path, exclude_dir))
+            local_exclude_dir_list.append('{snapshot_mount_point_base_path}{exclude_dir}'.format(
+                snapshot_mount_point_base_path=snapshot_mount_point_base_path,
+                exclude_dir=exclude_dir
+            ))
         	
         self.include_dir_list = local_include_dir_list
         self.exclude_dir_list = local_exclude_dir_list
