@@ -1,17 +1,28 @@
+from datetime import datetime, timedelta
+
 from ari_backup import LVMBackup, settings
 
-class NexentaLVMBackup(LVMBackup):
-    def __init__(self, source_hostname, label, rsync_dst_url):
+class ZFSLVMBackup(LVMBackup):
+    def __init__(self, label, source_hostname, rsync_dst_url, zfs_hostname, dataset_name, snapshot_expiration_days):
+        # assign instance vars specific to this class
         self.rsync_dst_url = rsync_dst_url
+        self.zfs_hostname = zfs_hostname
+        self.dataset_name = dataset_name
 
-        # We'll bring in the rsync_option from our settings, but it is a var
-        # that the end-user is welcome to override.
+        # bring in some overridable settings
         self.rsync_options = settings.rsync_options
+        self.snapshot_prefix = settings.zfs_snapshot_prefix
+
+        # the timestamp format we're going to use when naming our snapshots
+        self.snapshot_timestamp_format = '%Y-%m-%d--%H-%M'
 
         # call our super class's constructor to enable LVM snapshot management
-        super(NexentaLVMBackup, self).__init__(source_hostname, label, None)
+        super(ZFSLVMBackup, self).__init__(label, source_hostname, None)
 
-        # TODO setup hooks to create ZFS snapshots
+        self.post_job_hook_list.append((self._create_zfs_snapshot, {}))
+        self.post_job_hook_list.append(
+            (self._remove_zfs_snapshots_older_than, {'days': snapshot_expiration_days})
+        )
 
 
     def _run_backup(self):
@@ -37,4 +48,40 @@ class NexentaLVMBackup(LVMBackup):
             dst = self.rsync_dst_url
         )
 
-        self._run_command(command)
+        self.logger.info(command)
+        #self._run_command(command)
+
+
+    def _create_zfs_snapshot(self, error_case):
+        if not error_case:
+            snapshot_name = self.snapshot_prefix + datetime.now().strftime(self.snapshot_timestamp_format)
+            command = 'zfs snapshot {dataset_name}@{snapshot_name}'.format(
+                dataset_name=self.dataset_name, snapshot_name=snapshot_name)
+
+            self.logger.info(command)
+            #self._run_command(command, self.zfs_hostname)
+
+
+    def _remove_zfs_snapshots_older_than(self, days, error_case):
+        if not error_case:
+            expiration = datetime.now() - timedelta(days=days)
+
+            # Let's find all the snapshots for this dataset
+            command = 'zfs get -rH -o name,value type {dataset_name}'.format(dataset_name=self.dataset_name)
+            (stdout, stderr) = self._run_command(command, self.zfs_hostname)
+            snapshots = []
+            for line in stdout.split('\n'):
+                name, dataset_type = line.split('\t')
+                if dataset_type == 'snapshot':
+                    # Let's try to only consider destroying snapshots made by us ;)
+                    if name.split('@')[1].startswith(self.snapshot_prefix):
+                        snapshots.append(name)
+
+            # destroy expired snapshots
+            for snapshot in snapshots:
+                command = 'zfs get -H -o value creation {snapshot}'.format(snapshot=snapshot)
+                (stdout, stderr) = self._run_command(command, self.zfs_hostname)
+                creation_time = datetime.strptime(stdout.strip(), '%a %b %m  %H:M %Y')
+                if creation_time <= expiration:
+                    self.logger.info(command)
+                    #self._run_command('zfs destroy {snapshot}'.format(snapshot=snapshot)

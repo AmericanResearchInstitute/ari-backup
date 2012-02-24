@@ -31,12 +31,12 @@ class ARIBackup(object):
 
     '''
     def __init__(self, label, source_hostname, remove_older_than_timespec=None):
-        # This is the host that has the source data.
-        self.source_hostname = source_hostname
-
         # The name of the backup job (this will be the name of the directory in the backup store
         # that has the data).
         self.label = label
+
+        # This is the host that has the source data.
+        self.source_hostname = source_hostname
 
         # We'll bring in the remote_user from our settings, but it is a var
         # that the end-user is welcome to override.
@@ -94,6 +94,9 @@ class ARIBackup(object):
         Given an input string or list, we attempt to execute it on the host via
         SSH unless host is "localhost".
 
+        Returns a tuple with (stdout, stderr) if the exitcode is zero,
+        otherwise an Exception is raised.
+
         '''
         # make args a list if it's not already so
         if type(command) == str:
@@ -135,6 +138,8 @@ class ARIBackup(object):
                 'command attempted was "{command}".').format(
                     host=host, command=command)
             raise Exception(error_message)
+
+        return (stdout, stderr)
 
 
     def run_backup(self):
@@ -235,7 +240,7 @@ class ARIBackup(object):
         self.logger.info('_run_backup completed')
 
 
-    def _remove_older_than(self, timespec, error_case=False):
+    def _remove_older_than(self, timespec, error_case):
         '''Trims increments older than timespec
 
         Post-job hook that uses rdiff-backup's --remove-old-than feature to
@@ -266,8 +271,8 @@ class ARIBackup(object):
 
 
 class LVMBackup(ARIBackup):
-    def __init__(self, source_hostname, label, remove_older_than_timespec=None):
-        super(LVMBackup, self).__init__(source_hostname, label, remove_older_than_timespec)
+    def __init__(self, label, source_hostname, remove_older_than_timespec=None):
+        super(LVMBackup, self).__init__(label, source_hostname, remove_older_than_timespec)
 
         # This is a list of 2-tuples, where each inner 2-tuple expresses the LV
         # to back up, the mount point for that LV any mount options necessary.

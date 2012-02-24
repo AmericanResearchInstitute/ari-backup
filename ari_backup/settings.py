@@ -13,6 +13,7 @@ ssh_path = '/usr/bin/ssh'
 ssh_compression = False
 snapshot_suffix = '-ari_backup'
 rsync_path = '/usr/bin/rsync'
+zfs_snapshot_prefix = 'ari-backup-'
 
 # setup logging
 log = Logger('ARIBackup (settings)')
@@ -33,6 +34,7 @@ for k, v in conf.iteritems():
     elif k == 'snapshot_suffix': snapshot_suffix = v
     elif k == 'rsync_path': rsync_path = v
     elif k == 'rsync_options': rsync_options = v
+    elif k == 'zfs_snapshot_prefix': zfs_snapshot_prefix = v
     else:
         log.warning('{key}:{value} is not a recognized setting'.format(key=k, value=v))
 
