@@ -23,8 +23,8 @@ log = Logger('ARIBackup (settings)')
 with open('/etc/ari-backup/ari-backup.conf.yaml', 'r') as conf_file:
     conf = yaml.load(conf_file)
 
-# Any supported settings should be included in this block, otherwise an
-# They won't become attributes of the settings module.
+# Any supported settings should be included in this block, otherwise
+# they won't become attributes of the settings module.
 # TODO We need a way for extensions to ARIBackup to register settings
 for k, v in conf.iteritems():
     if k == 'backup_store_path': backup_store_path = v
