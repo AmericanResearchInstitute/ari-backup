@@ -37,14 +37,7 @@ class ZFSLVMBackup(LVMBackup):
         # We add a trailing slash to the src path otherwise rsync will make a
         # subdirectory at the destination, even if the destination is already
         # a directory.
-        if self.source_hostname == 'localhost':
-            rsync_src = self.snapshot_mount_point_base_path + '/'
-        else:
-            rsync_src = '{remote_user}@{source_hostname}::{snapshot_mount_point_base_path}/'.format(
-                remote_user=self.remote_user,
-                source_hostname=self.source_hostname,
-                snapshot_mount_point_base_path=self.snapshot_mount_point_base_path
-            )
+        rsync_src = self.snapshot_mount_point_base_path + '/'
 
         command = '{rsync_path} {rsync_options} {src} {dst}'.format(
             rsync_path=settings.rsync_path,
@@ -53,7 +46,7 @@ class ZFSLVMBackup(LVMBackup):
             dst=self.rsync_dst
         )
 
-        self._run_command(command)
+        self._run_command(command, self.source_hostname)
         self.logger.debug('ZFSLVMBackup._run_backup completed')
 
 
