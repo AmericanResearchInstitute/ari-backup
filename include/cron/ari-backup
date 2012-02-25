@@ -6,7 +6,7 @@ LOCKDIR=/var/lock/ari-backup.cron
 
 if mkdir "$LOCKDIR" 2>/dev/null
 then
-    trap 'rm -rf "$LOCKDIR"' EXIT
+    trap 'rmdir "$LOCKDIR"' EXIT
 # We use run-parts to get the list of jobs to ensure that our scripts are LSB
 # compliant. We use xargs to run backups concurrently. We use -I with bash's
 # exec just to avoid eating up twice the space in the process table.
