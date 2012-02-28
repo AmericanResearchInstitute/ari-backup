@@ -249,7 +249,7 @@ class ARIBackup(object):
         trim old increments from the backup history
 
         '''
-        if not error_case: 
+        if not error_case:
             self.logger.info('remove_older_than %s started' % timespec)
 
             arg_list = [settings.rdiff_backup_path]
@@ -284,7 +284,7 @@ class LVMBackup(ARIBackup):
         self.pre_job_hook_list.append((self._mount_snapshots, {}))
         self.post_job_hook_list.append((self._umount_snapshots, {}))
         self.post_job_hook_list.append((self._delete_snapshots, {}))
- 
+
 
     def _create_snapshots(self):
         '''Creates snapshots of all the volumns listed in self.lv_list'''
@@ -318,11 +318,11 @@ class LVMBackup(ARIBackup):
 
 
     def _delete_snapshots(self, error_case=None):
-    	'''Deletes snapshots in self.lv_snapshots
-    	
-    	This method behaves the same in the normal and error cases.
-    	
-    	'''
+        '''Deletes snapshots in self.lv_snapshots
+
+        This method behaves the same in the normal and error cases.
+
+        '''
         self.logger.info('deleting LVM snapshots...')
         for snapshot in self.lv_snapshots:
             if snapshot['created']:
@@ -348,10 +348,10 @@ class LVMBackup(ARIBackup):
             # let's back out.
             if os.path.ismount(mount_path):
                 raise Exception("{mount_path} is already a mount point".format(mount_path=mount_path))
-                
+
             # mount the LV, possibly with mount options
             if mount_options:
-                command = 'mount -o {mount_options} {device_path} {mount_path}'.format( 
+                command = 'mount -o {mount_options} {device_path} {mount_path}'.format(
                     mount_options=mount_options,
                     device_path=device_path,
                     mount_path=mount_path
@@ -367,11 +367,11 @@ class LVMBackup(ARIBackup):
 
 
     def _umount_snapshots(self, error_case=None):
-    	'''Umounts mounted snapshots in self.lv_snapshots
-    	
-    	This method behaves the same in the normal and error cases.
-    	
-    	'''
+        '''Umounts mounted snapshots in self.lv_snapshots
+
+        This method behaves the same in the normal and error cases.
+
+        '''
         # TODO If the user doesn't put '/' in their include_dir_list, then
         # we'll end up with directories around where the snapshots are mounted
         # that will not get cleaned up.  We should probably add functionality
@@ -397,9 +397,9 @@ class LVMBackup(ARIBackup):
 
     def _run_backup(self):
         '''Run backup of LVM snapshots'''
-        
+
         self.logger.debug('LVMBackup._run_backup started')
-        
+
         # Cook the self.include_dir_list and self.exclude_dir_list so that the
         # src paths include the mount path for the LV(s).
         local_include_dir_list = []
@@ -408,14 +408,14 @@ class LVMBackup(ARIBackup):
                 snapshot_mount_point_base_path=snapshot_mount_point_base_path,
                 include_dir=include_dir
             ))
-        
+
         local_exclude_dir_list = []
         for exclude_dir in self.exclude_dir_list:
             local_exclude_dir_list.append('{snapshot_mount_point_base_path}{exclude_dir}'.format(
                 snapshot_mount_point_base_path=snapshot_mount_point_base_path,
                 exclude_dir=exclude_dir
             ))
-        	
+
         self.include_dir_list = local_include_dir_list
         self.exclude_dir_list = local_exclude_dir_list
 
@@ -424,5 +424,5 @@ class LVMBackup(ARIBackup):
 
 		# Have the base class perform an rdiff-backup
         super(LVMBackup, self)._run_backup(self.snapshot_mount_point_base_path)
-        
+
         self.logger.debug('LVMBackup._run_backup completed')

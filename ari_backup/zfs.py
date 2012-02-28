@@ -14,7 +14,7 @@ class ZFSLVMBackup(LVMBackup):
         self.snapshot_prefix = settings.zfs_snapshot_prefix
 
         # the timestamp format we're going to use when naming our snapshots
-        self.snapshot_timestamp_format = '%Y-%m-%d--%H-%M'
+        self.snapshot_timestamp_format = '%Y-%m-%d--%H%M'
 
         # call our super class's constructor to enable LVM snapshot management
         super(ZFSLVMBackup, self).__init__(label, source_hostname, None)
