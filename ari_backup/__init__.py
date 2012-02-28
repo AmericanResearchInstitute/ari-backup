@@ -72,7 +72,7 @@ class ARIBackup(object):
             hook(**kwargs)
 
 
-    def _process_post_job_hooks(self, error_case=False):
+    def _process_post_job_hooks(self, error_case):
         if error_case:
             self.logger.error('processing post-job hooks for error case...')
         else:
@@ -143,22 +143,23 @@ class ARIBackup(object):
     def run_backup(self):
         self.logger.info('started')
         try:
+            error_case = False
             self._process_pre_job_hooks()
             self.logger.info('data backup started...')
             self._run_backup()
             self.logger.info('data backup complete')
-            self._process_post_job_hooks()
         except Exception, e:
+            error_case = True
             self.logger.error((str(e)))
             self.logger.info("let's try to clean up...")
-            self._process_post_job_hooks(error_case=True)
         except KeyboardInterrupt:
+            error_case = True
             # using error level here so that these messages will
             # print to the console
             self.logger.error('backup job cancelled by user')
             self.logger.error("let's try to clean up...")
-            self._process_post_job_hooks(error_case=True)
         finally:
+            self._process_post_job_hooks(error_case)
             self.logger.info('stopped')
 
 
