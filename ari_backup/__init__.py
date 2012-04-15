@@ -112,7 +112,7 @@ class ARIBackup(object):
         try:
             self.logger.debug('_run_command %r' % args)
             p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            # We really want to block until our subprocess exists on
+            # We really want to block until our subprocess exists or
             # KeyboardInterrupt. If we don't, clean up tasks can likely fail.
             try:
                 stdout, stderr = p.communicate()
